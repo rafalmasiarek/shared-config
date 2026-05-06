@@ -103,7 +103,12 @@ def explicit_source_paths(repo: dict) -> set[Path]:
     return paths
 
 
-def copy_tree(source: Path, target: Path, skipped_sources: set[Path]) -> None:
+def copy_tree(
+    source: Path,
+    target: Path,
+    skipped_sources: set[Path],
+    excluded_paths: set[str],
+) -> None:
     for item in source.rglob("*"):
         if item.is_dir():
             continue
@@ -119,6 +124,10 @@ def copy_tree(source: Path, target: Path, skipped_sources: set[Path]) -> None:
 
         if relative_str in IGNORED_TARGET_PATHS:
             print(f"Skipping globally ignored file: {relative_str}")
+            continue
+
+        if relative_str in excluded_paths:
+            print(f"Skipping repo excluded file: {relative_str}")
             continue
 
         destination = target / relative
@@ -149,10 +158,11 @@ def selected_sources(repo: dict) -> list[Path]:
 
 def apply_sources(repo: dict, target: Path) -> None:
     skipped_sources = explicit_source_paths(repo)
+    excluded_paths = set(repo.get("exclude", []))
 
     for source in selected_sources(repo):
         print(f"Applying source tree: {source.relative_to(ROOT)}")
-        copy_tree(source, target, skipped_sources)
+        copy_tree(source, target, skipped_sources, excluded_paths)
 
 
 def apply_explicit_files(repo: dict, target: Path) -> None:
