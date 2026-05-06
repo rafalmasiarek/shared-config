@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: pip install pyyaml
+        run: pip install pyyaml jinja2
 
       - name: Configure git
         run: |

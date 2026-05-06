@@ -6,8 +6,19 @@ defaults:
   pr_body: |
     Automated sync from shared-config.
 
+vars:
+  dependabot_interval: weekly
+  dependabot_open_pr_limit: 5
+  dependabot_commit_prefix: chore(deps)
+
 policies:
-  files/js/.github/dependabot.yml:
+  files/js/.github/dependabot.yml.tpl:
+    mode: append
+  files/php/.github/dependabot.yml.tpl:
+    mode: append
+  files/python/.github/dependabot.yml.tpl:
+    mode: append
+  files/docker/.github/dependabot.yml.tpl:
     mode: append
 
 repositories:

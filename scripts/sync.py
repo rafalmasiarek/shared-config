@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from jinja2 import Environment, StrictUndefined
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -80,6 +81,45 @@ def optional_file_sha256(path: Path) -> str | None:
     return file_sha256(path)
 
 
+def render_template(content: str, context: dict[str, Any]) -> str:
+    env = Environment(
+        undefined=StrictUndefined,
+        trim_blocks=True,
+        lstrip_blocks=True,
+        autoescape=False,
+    )
+
+    template = env.from_string(content)
+    return template.render(**context)
+
+
+def read_source_text(source: Path, context: dict[str, Any]) -> str:
+    content = source.read_text()
+
+    if source.suffix == ".tpl":
+        return render_template(content, context)
+
+    return content
+
+
+def target_relative_path(relative: Path) -> Path:
+    if relative.suffix == ".tpl":
+        return relative.with_suffix("")
+
+    return relative
+
+
+def target_path_from_mapping(target_path: str) -> str:
+    if target_path.endswith(".tpl"):
+        return target_path[:-4]
+
+    return target_path
+
+
+def source_report_path(source: Path) -> str:
+    return source.relative_to(ROOT).as_posix()
+
+
 def merge_unique_lists(left: list[Any], right: list[Any]) -> list[Any]:
     result = list(left)
     seen = {json.dumps(item, sort_keys=True, ensure_ascii=False) for item in result}
@@ -112,7 +152,22 @@ def merge_data(existing: Any, addition: Any) -> Any:
     return addition
 
 
-def copy_file(source: Path, destination: Path) -> None:
+def write_rendered_file(source: Path, destination: Path, context: dict[str, Any]) -> None:
+    if not source.exists():
+        raise FileNotFoundError(f"Source file does not exist: {source}")
+
+    if not source.is_file():
+        raise ValueError(f"Source is not a file: {source}")
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(read_source_text(source, context))
+
+
+def copy_file(source: Path, destination: Path, context: dict[str, Any]) -> None:
+    if source.suffix == ".tpl":
+        write_rendered_file(source, destination, context)
+        return
+
     if not source.exists():
         raise FileNotFoundError(f"Source file does not exist: {source}")
 
@@ -123,7 +178,7 @@ def copy_file(source: Path, destination: Path) -> None:
     shutil.copy2(source, destination)
 
 
-def append_text_file(source: Path, destination: Path, label: str) -> None:
+def append_text_file(source: Path, destination: Path, label: str, context: dict[str, Any]) -> None:
     if not source.exists():
         raise FileNotFoundError(f"Source file does not exist: {source}")
 
@@ -133,7 +188,7 @@ def append_text_file(source: Path, destination: Path, label: str) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     existing = destination.read_text() if destination.exists() else ""
-    addition = source.read_text()
+    addition = read_source_text(source, context)
 
     with destination.open("w") as f:
         if existing.strip():
@@ -145,7 +200,7 @@ def append_text_file(source: Path, destination: Path, label: str) -> None:
         f.write("\n")
 
 
-def append_yaml_file(source: Path, destination: Path) -> None:
+def append_yaml_file(source: Path, destination: Path, context: dict[str, Any]) -> None:
     if not source.exists():
         raise FileNotFoundError(f"Source file does not exist: {source}")
 
@@ -154,8 +209,8 @@ def append_yaml_file(source: Path, destination: Path) -> None:
 
     destination.parent.mkdir(parents=True, exist_ok=True)
 
-    with source.open() as f:
-        addition = yaml.safe_load(f) or {}
+    rendered_addition = read_source_text(source, context)
+    addition = yaml.safe_load(rendered_addition) or {}
 
     if destination.exists() and destination.read_text().strip():
         with destination.open() as f:
@@ -174,7 +229,7 @@ def append_yaml_file(source: Path, destination: Path) -> None:
         )
 
 
-def append_json_file(source: Path, destination: Path) -> None:
+def append_json_file(source: Path, destination: Path, context: dict[str, Any]) -> None:
     if not source.exists():
         raise FileNotFoundError(f"Source file does not exist: {source}")
 
@@ -183,8 +238,7 @@ def append_json_file(source: Path, destination: Path) -> None:
 
     destination.parent.mkdir(parents=True, exist_ok=True)
 
-    with source.open() as f:
-        addition = json.load(f)
+    addition = json.loads(read_source_text(source, context))
 
     if destination.exists() and destination.read_text().strip():
         with destination.open() as f:
@@ -199,18 +253,18 @@ def append_json_file(source: Path, destination: Path) -> None:
         f.write("\n")
 
 
-def append_file(source: Path, destination: Path, label: str) -> str:
-    suffix = source.suffix.lower()
+def append_file(source: Path, destination: Path, label: str, context: dict[str, Any]) -> str:
+    suffix = destination.suffix.lower()
 
     if suffix in {".yml", ".yaml"}:
-        append_yaml_file(source, destination)
+        append_yaml_file(source, destination, context)
         return "append-yaml"
 
     if suffix == ".json":
-        append_json_file(source, destination)
+        append_json_file(source, destination, context)
         return "append-json"
 
-    append_text_file(source, destination, label)
+    append_text_file(source, destination, label, context)
     return "append-text"
 
 
@@ -221,12 +275,46 @@ def resolve_file_mode(source_path: str, mapping: dict | None, config: dict) -> s
     return config.get("policies", {}).get(source_path, {}).get("mode", "overwrite")
 
 
+def build_template_context(
+    repo: dict,
+    repo_name: str,
+    short_name: str,
+    topics: list[str],
+    source_path: str,
+    target_path: str,
+    base_branch: str,
+    branch: str,
+    config: dict,
+) -> dict[str, Any]:
+    context: dict[str, Any] = {
+        "repo": repo_name,
+        "repo_short_name": short_name,
+        "topics": topics,
+        "topics_csv": ",".join(topics),
+        "source": source_path,
+        "target": target_path,
+        "base_branch": base_branch,
+        "sync_branch": branch,
+    }
+
+    context.update(config.get("vars", {}))
+
+    for topic in topics:
+        context.update(config.get("topic_vars", {}).get(topic, {}))
+
+    context.update(repo.get("vars", {}))
+    context.update(config.get("file_vars", {}).get(source_path, {}))
+
+    return context
+
+
 def apply_file(
     source: Path,
     destination: Path,
     source_path: str,
     target_path: str,
     mode: str,
+    context: dict[str, Any],
     report: list[dict],
 ) -> None:
     before_hash = optional_file_sha256(destination)
@@ -234,10 +322,10 @@ def apply_file(
     print(f"Applying file: {source_path} -> {target_path} [{mode}]")
 
     if mode == "overwrite":
-        copy_file(source, destination)
-        final_mode = "overwrite"
+        copy_file(source, destination, context)
+        final_mode = "overwrite-template" if source.suffix == ".tpl" else "overwrite"
     elif mode == "append":
-        final_mode = append_file(source, destination, source_path)
+        final_mode = append_file(source, destination, source_path, context)
     else:
         raise ValueError(f"Unsupported file mode: {mode}")
 
@@ -278,6 +366,12 @@ def copy_tree(
     target: Path,
     skipped_sources: set[Path],
     excluded_paths: set[str],
+    repo: dict,
+    repo_name: str,
+    short_name: str,
+    topics: list[str],
+    base_branch: str,
+    branch: str,
     config: dict,
     report: list[dict],
 ) -> None:
@@ -293,19 +387,32 @@ def copy_tree(
 
         relative = item.relative_to(source)
         relative_str = relative.as_posix()
+        target_relative = target_relative_path(relative)
+        target_path = target_relative.as_posix()
 
         if relative_str in IGNORED_TARGET_PATHS:
             print(f"Skipping globally ignored file: {relative_str}")
             continue
 
-        if relative_str in excluded_paths:
-            print(f"Skipping repo excluded file: {relative_str}")
+        if target_path in excluded_paths or relative_str in excluded_paths:
+            print(f"Skipping repo excluded file: {target_path}")
             continue
 
-        source_path = item.relative_to(ROOT).as_posix()
-        target_path = relative_str
-        destination = target / relative
+        source_path = source_report_path(item)
+        destination = target / target_relative
         mode = resolve_file_mode(source_path, None, config)
+
+        context = build_template_context(
+            repo,
+            repo_name,
+            short_name,
+            topics,
+            source_path,
+            target_path,
+            base_branch,
+            branch,
+            config,
+        )
 
         apply_file(
             item,
@@ -313,13 +420,13 @@ def copy_tree(
             source_path,
             target_path,
             mode,
+            context,
             report,
         )
 
 
-def selected_sources(repo: dict) -> list[Path]:
+def selected_sources(repo: dict, topics: list[str]) -> list[Path]:
     repo_name = repo["name"]
-    topics = get_repo_topics(repo_name)
 
     print(f"Repository topics for {repo_name}: {topics}")
 
@@ -347,23 +454,68 @@ def selected_sources(repo: dict) -> list[Path]:
     return sources
 
 
-def apply_sources(repo: dict, target: Path, config: dict, report: list[dict]) -> None:
+def apply_sources(
+    repo: dict,
+    target: Path,
+    repo_name: str,
+    short_name: str,
+    topics: list[str],
+    base_branch: str,
+    branch: str,
+    config: dict,
+    report: list[dict],
+) -> None:
     skipped_sources = explicit_source_paths(repo)
     excluded_paths = set(repo.get("exclude", []))
 
-    for source in selected_sources(repo):
+    for source in selected_sources(repo, topics):
         print(f"Applying source tree: {source.relative_to(ROOT)}")
-        copy_tree(source, target, skipped_sources, excluded_paths, config, report)
+        copy_tree(
+            source,
+            target,
+            skipped_sources,
+            excluded_paths,
+            repo,
+            repo_name,
+            short_name,
+            topics,
+            base_branch,
+            branch,
+            config,
+            report,
+        )
 
 
-def apply_explicit_files(repo: dict, target: Path, config: dict, report: list[dict]) -> None:
+def apply_explicit_files(
+    repo: dict,
+    target: Path,
+    repo_name: str,
+    short_name: str,
+    topics: list[str],
+    base_branch: str,
+    branch: str,
+    config: dict,
+    report: list[dict],
+) -> None:
     for mapping in repo.get("files", []):
         source_path = mapping["from"]
-        target_path = mapping["to"]
+        target_path = target_path_from_mapping(mapping["to"])
 
         source = safe_root_path(source_path)
         destination = target / target_path
         mode = resolve_file_mode(source_path, mapping, config)
+
+        context = build_template_context(
+            repo,
+            repo_name,
+            short_name,
+            topics,
+            source_path,
+            target_path,
+            base_branch,
+            branch,
+            config,
+        )
 
         apply_file(
             source,
@@ -371,6 +523,7 @@ def apply_explicit_files(repo: dict, target: Path, config: dict, report: list[di
             source_path,
             target_path,
             mode,
+            context,
             report,
         )
 
@@ -471,6 +624,7 @@ def sync_repo(repo: dict, config: dict) -> None:
     short_name = repo_short_name(repo_name)
     base_branch = repo.get("base_branch", defaults["base_branch"])
     branch = f"{defaults['branch_prefix']}/{short_name}"
+    topics = get_repo_topics(repo_name)
     report: list[dict] = []
 
     token = os.environ["GH_TOKEN"]
@@ -483,8 +637,8 @@ def sync_repo(repo: dict, config: dict) -> None:
         run(["git", "checkout", base_branch], cwd=repo_dir)
         run(["git", "checkout", "-B", branch], cwd=repo_dir)
 
-        apply_sources(repo, repo_dir, config, report)
-        apply_explicit_files(repo, repo_dir, config, report)
+        apply_sources(repo, repo_dir, repo_name, short_name, topics, base_branch, branch, config, report)
+        apply_explicit_files(repo, repo_dir, repo_name, short_name, topics, base_branch, branch, config, report)
 
         if not has_changes(repo_dir):
             print(f"No changes for {repo_name}")
