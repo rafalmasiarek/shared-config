@@ -1,0 +1,19 @@
+name: Sync shared config to repositories
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "files/**"
+      - "repos/**"
+      - "repos.yml"
+      - "scripts/**"
+      - ".github/workflows/reusable-sync.yml"
+
+jobs:
+  sync:
+    uses: ./.github/workflows/reusable-sync.yml
+    secrets:
+      GH_TOKEN: ${{ secrets.SHARED_CONFIG_SYNC_TOKEN }}

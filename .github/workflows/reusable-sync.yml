@@ -1,0 +1,28 @@
+name: Reusable shared config sync
+
+on:
+  workflow_call:
+    secrets:
+      GH_TOKEN:
+        required: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout shared config repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Configure git
+        run: |
+          git config --global user.name "shared-config-bot"
+          git config --global user.email "shared-config-bot@users.noreply.github.com"
+
+      - name: Sync files
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: python scripts/sync.py

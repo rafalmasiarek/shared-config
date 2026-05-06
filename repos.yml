@@ -1,0 +1,14 @@
+defaults:
+  base_branch: main
+  branch_prefix: shared-config
+  commit_message: "chore: sync shared config"
+  pr_title: "chore: sync shared config"
+  pr_body: |
+    Automated sync from shared-config.
+
+repositories:
+  - name: rafalmasiarek/cdn.masiarek.dev
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
+        mode: overwrite
