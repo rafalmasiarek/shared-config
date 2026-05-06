@@ -138,23 +138,30 @@ def selected_sources(repo: dict) -> list[Path]:
     repo_name = repo["name"]
     topics = get_repo_topics(repo_name)
 
+    print(f"Repository topics for {repo_name}: {topics}")
+
     sources: list[Path] = []
 
     common_dir = FILES_DIR / "common"
     if common_dir.exists():
+        print(f"Matched common directory: {common_dir.relative_to(ROOT)}")
         sources.append(common_dir)
 
     for topic in topics:
         topic_dir = FILES_DIR / topic
+
         if topic_dir.exists():
+            print(f"Matched topic directory: {topic_dir.relative_to(ROOT)}")
             sources.append(topic_dir)
+        else:
+            print(f"No local directory for topic: {topic}")
 
     dedicated_dir = REPOS_DIR / repo_short_name(repo_name)
     if dedicated_dir.exists():
+        print(f"Matched dedicated directory: {dedicated_dir.relative_to(ROOT)}")
         sources.append(dedicated_dir)
 
     return sources
-
 
 def apply_sources(repo: dict, target: Path) -> None:
     skipped_sources = explicit_source_paths(repo)
