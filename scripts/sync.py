@@ -199,7 +199,6 @@ def append_text_file(source: Path, destination: Path, label: str, context: dict[
         f.write(addition.rstrip())
         f.write("\n")
 
-
 def append_yaml_file(source: Path, destination: Path, context: dict[str, Any]) -> None:
     if not source.exists():
         raise FileNotFoundError(f"Source file does not exist: {source}")
@@ -209,25 +208,18 @@ def append_yaml_file(source: Path, destination: Path, context: dict[str, Any]) -
 
     destination.parent.mkdir(parents=True, exist_ok=True)
 
-    rendered_addition = read_source_text(source, context)
-    addition = yaml.safe_load(rendered_addition) or {}
+    existing = destination.read_text() if destination.exists() else ""
+    addition = read_source_text(source, context)
 
-    if destination.exists() and destination.read_text().strip():
-        with destination.open() as f:
-            existing = yaml.safe_load(f) or {}
+    if existing.strip():
+        merged_text = existing.rstrip() + "\n" + addition.rstrip() + "\n"
     else:
-        existing = {}
+        merged_text = addition.rstrip() + "\n"
 
-    merged = merge_data(existing, addition)
+    # Validate final YAML, but keep the original formatting and comments.
+    yaml.safe_load(merged_text)
 
-    with destination.open("w") as f:
-        yaml.safe_dump(
-            merged,
-            f,
-            sort_keys=False,
-            allow_unicode=True,
-        )
-
+    destination.write_text(merged_text)
 
 def append_json_file(source: Path, destination: Path, context: dict[str, Any]) -> None:
     if not source.exists():
