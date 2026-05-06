@@ -15,6 +15,10 @@ FILES_DIR = ROOT / "files"
 REPOS_DIR = ROOT / "repos"
 CONFIG_PATH = ROOT / "repos.yml"
 
+IGNORED_TARGET_PATHS = {
+    ".gitignore",
+}
+
 
 def run(cmd: list[str], cwd: Path | None = None, capture: bool = False) -> str:
     print("+", " ".join(cmd))
@@ -111,6 +115,12 @@ def copy_tree(source: Path, target: Path, skipped_sources: set[Path]) -> None:
             continue
 
         relative = item.relative_to(source)
+        relative_str = relative.as_posix()
+
+        if relative_str in IGNORED_TARGET_PATHS:
+            print(f"Skipping globally ignored file: {relative_str}")
+            continue
+
         destination = target / relative
         copy_file(item, destination)
 
