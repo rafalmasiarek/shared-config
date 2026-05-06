@@ -16,7 +16,7 @@ REPOS_DIR = ROOT / "repos"
 CONFIG_PATH = ROOT / "repos.yml"
 
 IGNORED_TARGET_PATHS = {
-    ".gitignore",
+    ".gitkeep",
 }
 
 
