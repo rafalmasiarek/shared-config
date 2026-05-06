@@ -15,7 +15,7 @@ rules:
       labels_none:
         - dependencies
     then:
-      assign: ['@repo_owner']
+      assign: [ "@repo_owner" ]
       comment_once_key: welcome-issue
       comment: |
         Thanks for opening this issue, @{author} 👋
@@ -30,9 +30,9 @@ rules:
       - issues.edited
     if:
       type: issue
-      title_matches: '/bug|error|exception|fail/i'
+      title_matches: "/bug|error|exception|fail/i"
     then:
-      add_labels: [bug, triaged]
+      add_labels: [ bug, triaged ]
       comment_once_key: bug-routed
     stop: false
 
@@ -79,7 +79,7 @@ rules:
     if:
       type: issue
     then:
-      assign: ['@repo_owner']
+      assign: [ "@repo_owner" ]
     stop: true
 
   - name: review-all-prs
@@ -97,7 +97,7 @@ rules:
     if:
       type: pull_request
     then:
-      request_reviewers: ['@repo_owner']
+      request_reviewers: [ "@repo_owner" ]
       comment_once_key: pr-review-requested
       comment: |
         Thanks for opening this pull request, @{author} 👋
