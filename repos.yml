@@ -12,6 +12,9 @@ repositories:
       - from: files/shared/triage-rules.yml
         to: .github/triage-rules.yml
         mode: overwrite
+      - from: files/js/.github/dependabot.yml
+        to: .github/dependabot.yml
+        mode: append
 
   - name: rafalmasiarek/php-images
     exclude:
