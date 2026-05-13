@@ -23,6 +23,7 @@ policies:
 
 repositories:
   - name: rafalmasiarek/n8n-workflows
+    commit_message: "chore: sync shared config [skip deploy]"
   - name: rafalmasiarek/cdn.masiarek.dev
     files:
       - from: files/shared/triage-rules.yml
