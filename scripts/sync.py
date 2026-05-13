@@ -267,6 +267,10 @@ def resolve_file_mode(source_path: str, mapping: dict | None, config: dict) -> s
     return config.get("policies", {}).get(source_path, {}).get("mode", "overwrite")
 
 
+def resolve_commit_message(repo: dict, defaults: dict) -> str:
+    return repo.get("commit_message", defaults.get("commit_message", "chore: sync shared config"))
+
+
 def build_template_context(
     repo: dict,
     repo_name: str,
@@ -636,8 +640,10 @@ def sync_repo(repo: dict, config: dict) -> None:
             print(f"No changes for {repo_name}")
             return
 
+        commit_message = resolve_commit_message(repo, defaults)
+
         run(["git", "add", "."], cwd=repo_dir)
-        run(["git", "commit", "-m", defaults["commit_message"]], cwd=repo_dir)
+        run(["git", "commit", "-m", commit_message], cwd=repo_dir)
         run(["git", "push", "--force", "origin", branch], cwd=repo_dir)
 
         create_pr_if_needed(repo_name, branch, base_branch, defaults, report)
