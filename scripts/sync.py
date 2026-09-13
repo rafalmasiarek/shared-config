@@ -587,33 +587,48 @@ def create_pr_if_needed(
     base_branch: str,
     defaults: dict,
     report: list[dict],
-) -> None:
+) -> str | None:
     if pr_exists(repo_name, branch):
         print(f"Open PR already exists for {repo_name}:{branch}")
-        return
+        existing = run(
+            [
+                "gh", "pr", "list",
+                "--repo", repo_name,
+                "--head", branch,
+                "--state", "open",
+                "--json", "url",
+                "--jq", ".[0].url",
+            ],
+            capture=True,
+        )
+        return existing.strip() or None
 
     body = defaults["pr_body"].rstrip()
     body += "\n"
     body += render_sync_report(report)
 
-    run([
-        "gh",
-        "pr",
-        "create",
-        "--repo",
-        repo_name,
-        "--base",
-        base_branch,
-        "--head",
-        branch,
-        "--title",
-        defaults["pr_title"],
-        "--body",
-        body,
-    ])
+    url = run(
+        [
+            "gh",
+            "pr",
+            "create",
+            "--repo",
+            repo_name,
+            "--base",
+            base_branch,
+            "--head",
+            branch,
+            "--title",
+            defaults["pr_title"],
+            "--body",
+            body,
+        ],
+        capture=True,
+    )
+    return url.strip() or None
 
 
-def sync_repo(repo: dict, config: dict) -> None:
+def sync_repo(repo: dict, config: dict) -> str | None:
     defaults = config["defaults"]
 
     repo_name = repo["name"]
@@ -638,7 +653,7 @@ def sync_repo(repo: dict, config: dict) -> None:
 
         if not has_changes(repo_dir):
             print(f"No changes for {repo_name}")
-            return
+            return None
 
         commit_message = resolve_commit_message(repo, defaults)
 
@@ -646,15 +661,59 @@ def sync_repo(repo: dict, config: dict) -> None:
         run(["git", "commit", "-m", commit_message], cwd=repo_dir)
         run(["git", "push", "--force", "origin", branch], cwd=repo_dir)
 
-        create_pr_if_needed(repo_name, branch, base_branch, defaults, report)
+        return create_pr_if_needed(repo_name, branch, base_branch, defaults, report)
+
+
+def write_summary(results: list[dict]) -> None:
+    lines = [
+        "# Sync summary",
+        "",
+        "| Repository | Status | PR |",
+        "|---|---|---|",
+    ]
+
+    for r in results:
+        repo = r["repo"]
+        if r["status"] == "error":
+            status = "❌ error"
+            pr_cell = f"`{r['error'][:120]}`"
+        elif r["pr_url"]:
+            status = "✅ created"
+            pr_cell = f"[PR]({r['pr_url']})"
+        else:
+            status = "⏭️ no changes"
+            pr_cell = "—"
+
+        lines.append(f"| `{repo}` | {status} | {pr_cell} |")
+
+    content = "\n".join(lines) + "\n"
+    print(content)
+
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary_path:
+        with open(summary_path, "a") as f:
+            f.write(content)
 
 
 def main() -> None:
     with CONFIG_PATH.open() as f:
         config = yaml.safe_load(f)
 
+    results: list[dict] = []
+
     for repo in config.get("repositories", []):
-        sync_repo(repo, config)
+        repo_name = repo["name"]
+        try:
+            pr_url = sync_repo(repo, config)
+            results.append({"repo": repo_name, "status": "ok", "pr_url": pr_url, "error": None})
+        except Exception as e:
+            print(f"[ERROR] {repo_name}: {e}")
+            results.append({"repo": repo_name, "status": "error", "pr_url": None, "error": str(e)})
+
+    write_summary(results)
+
+    if any(r["status"] == "error" for r in results):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
