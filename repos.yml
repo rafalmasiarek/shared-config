@@ -116,27 +116,12 @@ repositories:
       - from: files/shared/triage-rules.yml
         to: .github/triage-rules.yml
 
-  - name: rafalmasiarek/PHP-Enigma
-    files:
-      - from: files/shared/triage-rules.yml
-        to: .github/triage-rules.yml
-
-  - name: rafalmasiarek/php-hcaptcha
-    files:
-      - from: files/shared/triage-rules.yml
-        to: .github/triage-rules.yml
-
   - name: rafalmasiarek/php-kv
     files:
       - from: files/shared/triage-rules.yml
         to: .github/triage-rules.yml
 
   - name: rafalmasiarek/php-realIpResolver
-    files:
-      - from: files/shared/triage-rules.yml
-        to: .github/triage-rules.yml
-
-  - name: rafalmasiarek/php-redirector
     files:
       - from: files/shared/triage-rules.yml
         to: .github/triage-rules.yml
