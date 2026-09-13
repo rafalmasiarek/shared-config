@@ -52,21 +52,96 @@ repositories:
         to: .github/triage-rules.yml
 
   - name: rafalmasiarek/php-dashboard-kit
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
 
   - name: rafalmasiarek/php-dashboard-kit-addon-api
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
 
   - name: rafalmasiarek/php-dashboard-kit-addon-compress
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
 
   - name: rafalmasiarek/php-dashboard-kit-addon-content
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
 
   - name: rafalmasiarek/php-dashboard-kit-addon-geoip
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
 
   - name: rafalmasiarek/php-dashboard-kit-addon-recaptcha
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
 
   - name: rafalmasiarek/php-dashboard-kit-addon-request-id
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
 
   - name: rafalmasiarek/php-dashboard-kit-addon-scheduler
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
 
   - name: rafalmasiarek/php-dashboard-kit-addon-sso
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
 
   - name: rafalmasiarek/masiarek.pl-api
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
+
+  - name: rafalmasiarek/php-AuthKit
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
+
+  - name: rafalmasiarek/php-contact-form
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
+
+  - name: rafalmasiarek/php-csrf
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
+
+  - name: rafalmasiarek/PHP-Enigma
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
+
+  - name: rafalmasiarek/php-hcaptcha
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
+
+  - name: rafalmasiarek/php-kv
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
+
+  - name: rafalmasiarek/php-realIpResolver
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
+
+  - name: rafalmasiarek/php-redirector
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
+
+  - name: rafalmasiarek/php-threat-detector
+    files:
+      - from: files/shared/triage-rules.yml
+        to: .github/triage-rules.yml
