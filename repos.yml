@@ -50,3 +50,23 @@ repositories:
     files:
       - from: files/shared/triage-rules.yml
         to: .github/triage-rules.yml
+
+  - name: rafalmasiarek/php-dashboard-kit
+
+  - name: rafalmasiarek/php-dashboard-kit-addon-api
+
+  - name: rafalmasiarek/php-dashboard-kit-addon-compress
+
+  - name: rafalmasiarek/php-dashboard-kit-addon-content
+
+  - name: rafalmasiarek/php-dashboard-kit-addon-geoip
+
+  - name: rafalmasiarek/php-dashboard-kit-addon-recaptcha
+
+  - name: rafalmasiarek/php-dashboard-kit-addon-request-id
+
+  - name: rafalmasiarek/php-dashboard-kit-addon-scheduler
+
+  - name: rafalmasiarek/php-dashboard-kit-addon-sso
+
+  - name: rafalmasiarek/masiarek.pl-api
