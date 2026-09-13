@@ -97,6 +97,9 @@ repositories:
         to: .github/triage-rules.yml
 
   - name: rafalmasiarek/masiarek.pl-api
+    exclude:
+      - .github/workflows/release-please.yml
+      - release-please-config.json
     files:
       - from: files/shared/triage-rules.yml
         to: .github/triage-rules.yml
