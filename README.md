@@ -2,9 +2,11 @@
 
 Centralized repository for synchronizing shared configuration files across multiple GitHub repositories.
 
-This repository keeps common files such as GitHub Actions workflows, Dependabot configuration, triage rules, linters, CI helpers, and repository-specific overrides in one place.
+This repository keeps common files such as GitHub Actions workflows, triage rules, Dependabot language-ecosystem configuration, linters, CI helpers, and repository-specific overrides in one place. Renovate is configured in this repository to update GitHub Actions references in workflows and shared YAML files under `files/`.
 
 The sync workflow clones configured repositories, applies matching shared files, commits the changes to a dedicated branch, and opens a pull request.
+
+Renovate PRs include the version-change table, available release notes/changelogs, warnings, and a review checklist. Major GitHub Actions updates require approval in the Dependency Dashboard. GitHub Actions are pinned to commit digests when Renovate supports it, improving supply-chain integrity. The PR asks reviewers to check advisories, but Renovate's alert coverage is not a complete security audit; verify upstream advisories and run project checks before merging.
 
 ## Structure
 
@@ -80,11 +82,6 @@ defaults:
   pr_body: |
     Automated sync from shared-config.
 
-vars:
-  dependabot_interval: weekly
-  dependabot_open_pr_limit: 5
-  dependabot_commit_prefix: chore(deps)
-
 repositories:
   - name: org/api-php
 
@@ -113,7 +110,10 @@ branch_prefix    # prefix for sync branches
 commit_message   # commit message used by the sync engine
 pr_title         # pull request title
 pr_body          # pull request body
+remove_paths     # optional files to remove from every configured destination repository
 ```
+
+`remove_paths` is an optional global cleanup policy. It is applied after shared and explicit files and respects each repository's `exclude` list. Paths must be relative files within the destination repository; directories and paths containing `..` are rejected. The current configuration does not set `remove_paths`.
 
 The sync branch is generated as:
 
@@ -236,20 +236,37 @@ This means explicit file mappings can override global policies.
 
 ## Excluding Files
 
-A repository can exclude target paths from automatic source tree application.
+A repository can exclude target paths from all synchronization operations: automatic source tree application, explicit mappings, and configured removals.
 
 ```yaml
 repositories:
-  - name: org/php-images
+  - name: org/legacy-app
     exclude:
+      - .github/workflows/ci.yml
       - .github/dependabot.yml
 ```
 
-This is useful when a repository should receive most topic-based files, but skip a specific one.
+Paths are destination paths. Excluding a file preserves its current version and prevents it from being applied by automatic copying, explicit mappings, or global cleanup. This excludes the whole file, not an individual dependency or action reference inside it.
 
-The `exclude` list is checked against target paths generated during automatic tree application.
+To preserve only a specific fragment while syncing the rest of a file, mark the block in the shared source file with comment markers:
 
-Explicit files from `repositories[].files[]` are still applied unless they are not listed there.
+```yaml
+# shared-config:block:start: checkout
+- uses: actions/checkout@v5
+# shared-config:block:end: checkout
+```
+
+Then configure the destination repository to preserve the existing contents of that named block:
+
+```yaml
+repositories:
+  - name: org/legacy-app
+    exclude_blocks:
+      - path: .github/workflows/ci.yml
+        name: checkout
+```
+
+On sync, the existing marked block from `org/legacy-app` is retained while the rest of `ci.yml` receives updates. The excluded block must already be marked in both the shared source and the destination file; otherwise sync fails rather than accidentally replacing it. To exclude a dependency bump safely, first add the markers without changing the dependency version and sync that change to destinations; then enable `exclude_blocks` before merging the version bump. Block exclusions require `overwrite` mode.
 
 ## Templates
 
@@ -257,45 +274,9 @@ Files ending with `.tpl` are rendered using Jinja2 before being written to the d
 
 The `.tpl` suffix is removed from the target path automatically.
 
-For example:
+For example, `files/common/config.yml.tpl` is written as `config.yml` in destination repositories. This applies both to automatically discovered files and explicit file mappings.
 
-```text
-files/php/.github/dependabot.yml.tpl
-```
-
-is written as:
-
-```text
-.github/dependabot.yml
-```
-
-This applies both to automatically discovered files and explicit file mappings.
-
-Example template:
-
-```jinja2
-version: 2
-updates:
-{% if "php" in topics %}
-  - package-ecosystem: "composer"
-    directory: "/"
-    schedule:
-      interval: "{{ dependabot_interval }}"
-    open-pull-requests-limit: {{ dependabot_open_pr_limit }}
-    commit-message:
-      prefix: "{{ dependabot_commit_prefix }}"
-{% endif %}
-
-{% if "docker" in topics %}
-  - package-ecosystem: "docker"
-    directory: "/"
-    schedule:
-      interval: "{{ dependabot_interval }}"
-    open-pull-requests-limit: {{ dependabot_open_pr_limit }}
-    commit-message:
-      prefix: "{{ dependabot_commit_prefix }}"
-{% endif %}
-```
+Dependabot configuration is distributed only for repositories with matching `js`, `php`, `python`, or `docker` topics. The shared configuration includes npm, Composer, pip, and Docker updates; it does not configure the `github-actions` ecosystem because Renovate manages updates to shared GitHub Actions.
 
 ## Template Variables
 
@@ -354,19 +335,17 @@ Global variables can be defined in the `vars` section.
 
 ```yaml
 vars:
-  dependabot_interval: weekly
-  dependabot_open_pr_limit: 5
-  dependabot_commit_prefix: chore(deps)
+  default_branch: main
+  enable_feature: true
 ```
 
 They are available in every template:
 
 ```jinja2
-schedule:
-  interval: "{{ dependabot_interval }}"
-open-pull-requests-limit: {{ dependabot_open_pr_limit }}
-commit-message:
-  prefix: "{{ dependabot_commit_prefix }}"
+branch: "{{ default_branch }}"
+{% if enable_feature %}
+feature_enabled: true
+{% endif %}
 ```
 
 ## Topic Variables
@@ -376,11 +355,9 @@ Topic-specific variables can be defined in `topic_vars`.
 ```yaml
 topic_vars:
   php:
-    dependabot_ecosystem: composer
     runtime: php
 
   js:
-    dependabot_ecosystem: npm
     runtime: node
 
   docker:
@@ -409,14 +386,14 @@ Repository-specific variables can be defined under `repositories[].vars`.
 repositories:
   - name: org/api-php
     vars:
-      dependabot_open_pr_limit: 10
+      default_branch: stable
       custom_ci_enabled: true
 ```
 
 Example:
 
 ```jinja2
-open-pull-requests-limit: {{ dependabot_open_pr_limit }}
+branch: "{{ default_branch }}"
 
 {% if custom_ci_enabled | default(false) %}
 # custom CI enabled
@@ -431,16 +408,14 @@ File-specific variables can be defined in `file_vars`.
 
 ```yaml
 file_vars:
-  files/php/.github/dependabot.yml.tpl:
-    dependabot_ecosystem: composer
-    dependabot_directory: /
+  files/common/config.yml.tpl:
+    config_version: 2
 ```
 
 Example:
 
 ```jinja2
-- package-ecosystem: "{{ dependabot_ecosystem }}"
-  directory: "{{ dependabot_directory }}"
+version: {{ config_version }}
 ```
 
 File variables are matched by source path.
@@ -487,56 +462,14 @@ Use this instead:
 {% endif %}
 ```
 
-## Example Dependabot Template
-
-Example file:
-
-```text
-files/php/.github/dependabot.yml.tpl
-```
-
-Content:
-
-```jinja2
-version: 2
-updates:
-  - package-ecosystem: "composer"
-    directory: "/"
-    schedule:
-      interval: "{{ dependabot_interval }}"
-    open-pull-requests-limit: {{ dependabot_open_pr_limit }}
-    commit-message:
-      prefix: "{{ dependabot_commit_prefix }}"
-
-{% if "github-actions" in topics %}
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "{{ dependabot_interval }}"
-    open-pull-requests-limit: {{ dependabot_open_pr_limit }}
-    commit-message:
-      prefix: "{{ dependabot_commit_prefix }}"
-{% endif %}
-```
-
-Example policy:
-
-```yaml
-policies:
-  files/php/.github/dependabot.yml.tpl:
-    mode: append
-```
-
 ## Example Repository With Overrides
 
 ```yaml
 repositories:
   - name: org/api-php
     base_branch: main
-    exclude:
-      - .github/dependabot.yml
     vars:
-      dependabot_open_pr_limit: 10
+      default_branch: stable
     files:
       - from: files/shared/triage-rules.yml
         to: .github/triage-rules.yml
@@ -551,8 +484,7 @@ This repository will:
 
 ```text
 use main as the base branch
-skip automatic .github/dependabot.yml application
-override dependabot_open_pr_limit
+override default_branch
 copy triage-rules.yml explicitly
 append shared PHP .gitignore content
 ```
@@ -560,6 +492,8 @@ append shared PHP .gitignore content
 ## Sync Report
 
 When a pull request is created, the sync engine appends a sync report to the pull request body.
+
+When the triggering commit belongs to a merged PR authored by `renovate[bot]` or `renovate-bot`, the sync PR also includes that source PR's title, link, and description (including any release notes, review checklist, and security information Renovate provided). Existing open sync PRs have their body refreshed on each sync run. The source PR body is copied as provided, except for Renovate's hidden debug metadata.
 
 The report contains:
 
@@ -596,6 +530,7 @@ clone configured repositories
 push branches
 create pull requests
 read repository topics
+read merged PR details in shared-config
 ```
 
 Recommended permissions for a fine-grained GitHub token:
@@ -618,12 +553,12 @@ env:
 
 The sync engine uses GitHub topics to select topic-based configuration directories.
 
-Only files are copied. Directories are created automatically as needed.
+Source files are copied and configured removal paths are deleted. Directories are created automatically as needed.
 
 `.gitkeep` files are ignored by default.
 
 Template rendering is only applied to files ending with `.tpl`.
 
-For `.tpl` files, the destination path is generated by removing the `.tpl` suffix.
+For `.tpl` files, the destination path is generated by removing the `.tpl` suffix. Root-level files such as `renovate.json` configure this repository and are not copied to destination repositories; Renovate's current configuration is preserved.
 
 Pull requests are not duplicated. If an open pull request already exists for the generated sync branch, the script skips creating a new one.

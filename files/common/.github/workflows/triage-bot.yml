@@ -24,12 +24,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
+        # shared-config:block:start: checkout
         uses: actions/checkout@v7
+        # shared-config:block:end: checkout
         with:
           fetch-depth: 0
 
       - name: Run triage action
+        # shared-config:block:start: triage-bot
         uses: rafalmasiarek/gh-triage-bot@v1
+        # shared-config:block:end: triage-bot
         with:
           config-path: .github/triage-rules.yml
           dry-run: ${{ github.event.inputs.dry_run || 'false' }}
