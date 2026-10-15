@@ -201,9 +201,19 @@ For plain text files, content is appended with a marker comment:
 # Added from shared-config: files/shared/.gitignore.php
 ```
 
-For YAML files, content is appended as YAML text and the final file is validated with `yaml.safe_load`.
+For YAML files, content is appended as YAML text, preceded by the same marker comment, and the final file is validated with `yaml.safe_load`.
 
-For JSON files, objects and arrays are merged structurally.
+## Header Comments
+
+Files written in `overwrite` mode get `Added from shared-config: <source path>` as a comment on top. The comment style is chosen by file name or extension in `header_comments` in `repos.yml`:
+
+```yaml
+header_comments:
+  "#": [.yml, .yaml, .toml, .sh, .py, .env, .gitignore, Dockerfile]
+  "<!-- -->": [.md, .html]
+```
+
+Files not listed (for example `.json`, `.php`, binaries) are written unchanged. The header goes after a `#!` line, and after YAML front matter for `<!-- -->` files. In `append` mode, each appended YAML or text fragment gets a `#` marker.
 
 ## Policy-Based File Modes
 
@@ -211,16 +221,7 @@ File modes can also be configured globally through `policies`.
 
 ```yaml
 policies:
-  files/js/.github/dependabot.yml.tpl:
-    mode: append
-
-  files/php/.github/dependabot.yml.tpl:
-    mode: append
-
-  files/python/.github/dependabot.yml.tpl:
-    mode: append
-
-  files/docker/.github/dependabot.yml.tpl:
+  files/shared/example.txt:
     mode: append
 ```
 
@@ -276,7 +277,11 @@ The `.tpl` suffix is removed from the target path automatically.
 
 For example, `files/common/config.yml.tpl` is written as `config.yml` in destination repositories. This applies both to automatically discovered files and explicit file mappings.
 
-Dependabot configuration is distributed only for repositories with matching `js`, `php`, `python`, or `docker` topics. The shared configuration includes npm, Composer, pip, and Docker updates; it does not configure the `github-actions` ecosystem because Renovate manages updates to shared GitHub Actions.
+## Skeleton Templates
+
+Files under `templates/` mirror destination paths and provide a file skeleton, for example `templates/.github/dependabot.yml.tpl` (`version: 2` / `updates:`). A skeleton is written only when a topic (`files/<topic>/`), a repository (`repos/<repo>/`) or an explicit mapping contributes a fragment to the same target path. Fragments are then added with `mode: append` from `policies`.
+
+For Dependabot, each language topic ships only its own ecosystem fragment (`files/js/.github/dependabot.yml.tpl`, etc.). A repository with no matching topic gets no file, and `files/common/` contains no Dependabot file. There is no `github-actions` ecosystem because Renovate manages updates to shared GitHub Actions. `exclude: [.github/dependabot.yml]` leaves the file untouched.
 
 ## Template Variables
 

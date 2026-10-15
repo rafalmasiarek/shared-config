@@ -11,6 +11,12 @@ vars:
   dependabot_open_pr_limit: 5
   dependabot_commit_prefix: chore(deps)
 
+# Marker comment added to files written in overwrite mode, by comment style.
+# Files not listed here (for example .json) are written without a header.
+header_comments:
+  "#": [.yml, .yaml, .toml, .sh, .py, .env, .gitignore, Dockerfile]
+  "<!-- -->": [.md, .html]
+
 policies:
   files/js/.github/dependabot.yml.tpl:
     mode: append
