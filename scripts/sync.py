@@ -17,6 +17,7 @@ from jinja2 import Environment, StrictUndefined
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES_DIR = ROOT / "files"
+TEMPLATES_DIR = ROOT / "templates"
 REPOS_DIR = ROOT / "repos"
 CONFIG_PATH = ROOT / "repos.yml"
 
@@ -157,6 +158,37 @@ def merge_data(existing: Any, addition: Any) -> Any:
     return addition
 
 
+def source_header(label: str) -> str:
+    return f"# Added from shared-config: {label}\n"
+
+
+def header_comment(path: str | Path, label: str, styles: dict[str, list[str]]) -> str | None:
+    path = Path(path)
+    keys = {path.name, path.suffix.lower()}
+
+    for style, names in styles.items():
+        if keys & set(names):
+            text = f"Added from shared-config: {label}"
+            return f"<!-- {text} -->\n" if style == "<!-- -->" else f"{style} {text}\n"
+
+    return None
+
+
+def insert_header(content: str, header: str) -> str:
+    lines = content.splitlines(keepends=True)
+
+    if lines and lines[0].startswith("#!"):
+        return lines[0] + header + "".join(lines[1:])
+
+    # Keep YAML front matter (for example in Markdown) at the very top.
+    if lines and lines[0].strip() == "---" and header.startswith("<!--"):
+        for index, line in enumerate(lines[1:], start=1):
+            if line.strip() == "---":
+                return "".join(lines[: index + 1]) + header + "".join(lines[index + 1 :])
+
+    return header + content
+
+
 def write_rendered_file(source: Path, destination: Path, context: dict[str, Any]) -> None:
     if not source.exists():
         raise FileNotFoundError(f"Source file does not exist: {source}")
@@ -204,7 +236,7 @@ def append_text_file(source: Path, destination: Path, label: str, context: dict[
         f.write(addition.rstrip())
         f.write("\n")
 
-def append_yaml_file(source: Path, destination: Path, context: dict[str, Any]) -> None:
+def append_yaml_file(source: Path, destination: Path, label: str, context: dict[str, Any]) -> None:
     if not source.exists():
         raise FileNotFoundError(f"Source file does not exist: {source}")
 
@@ -214,7 +246,7 @@ def append_yaml_file(source: Path, destination: Path, context: dict[str, Any]) -
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     existing = destination.read_text() if destination.exists() else ""
-    addition = read_source_text(source, context)
+    addition = source_header(label) + read_source_text(source, context)
 
     if existing.strip():
         merged_text = existing.rstrip() + "\n" + addition.rstrip() + "\n"
@@ -254,7 +286,7 @@ def append_file(source: Path, destination: Path, label: str, context: dict[str, 
     suffix = destination.suffix.lower()
 
     if suffix in {".yml", ".yaml"}:
-        append_yaml_file(source, destination, context)
+        append_yaml_file(source, destination, label, context)
         return "append-yaml"
 
     if suffix == ".json":
@@ -318,6 +350,7 @@ def apply_file(
     context: dict[str, Any],
     report: list[dict],
     excluded_blocks: list[dict],
+    header_styles: dict[str, list[str]],
 ) -> None:
     matching_rules = [rule for rule in excluded_blocks if rule["path"] == target_path]
     source_content = (
@@ -354,6 +387,12 @@ def apply_file(
             [rule["name"] for rule in matching_rules],
             target_path,
         )
+
+    header = header_comment(destination, source_path, header_styles) if mode == "overwrite" else None
+    if header:
+        if source_content is None:
+            source_content = source.read_text()
+        source_content = insert_header(source_content, header)
 
     before_hash = optional_file_sha256(destination)
 
@@ -537,6 +576,7 @@ def copy_tree(
             context,
             report,
             repo.get("exclude_blocks", []),
+            config.get("header_comments", {}),
         )
 
 
@@ -601,6 +641,80 @@ def apply_sources(
         )
 
 
+def fragment_target_paths(repo: dict, topics: list[str]) -> set[str]:
+    targets: set[str] = set()
+
+    for source in selected_sources(repo, topics):
+        if source == FILES_DIR / "common":
+            continue
+
+        for item in source.rglob("*"):
+            if item.is_file():
+                targets.add(target_relative_path(item.relative_to(source)).as_posix())
+
+    for mapping in repo.get("files", []):
+        targets.add(target_path_from_mapping(mapping["to"]))
+
+    return targets
+
+
+def apply_skeletons(
+    repo: dict,
+    target: Path,
+    repo_name: str,
+    short_name: str,
+    topics: list[str],
+    base_branch: str,
+    branch: str,
+    config: dict,
+    report: list[dict],
+) -> None:
+    # A skeleton is written only when a topic, repository or explicit mapping
+    # contributes a fragment to the same target file.
+    if not TEMPLATES_DIR.exists():
+        return
+
+    fragments = fragment_target_paths(repo, topics)
+    excluded_paths = set(repo.get("exclude", []))
+
+    for item in sorted(TEMPLATES_DIR.rglob("*")):
+        if item.is_dir():
+            continue
+
+        relative = item.relative_to(TEMPLATES_DIR)
+
+        if relative.name in IGNORED_TARGET_PATHS:
+            continue
+
+        target_relative = target_relative_path(relative)
+        target_path = target_relative.as_posix()
+
+        if target_path not in fragments:
+            print(f"Skipping skeleton without fragments: {target_path}")
+            continue
+
+        if is_excluded_path(target_path, excluded_paths):
+            print(f"Skipping repo excluded file: {target_path}")
+            continue
+
+        source_path = source_report_path(item)
+        context = build_template_context(
+            repo, repo_name, short_name, topics, source_path, target_path, base_branch, branch, config
+        )
+
+        apply_file(
+            item,
+            target / target_relative,
+            source_path,
+            target_path,
+            "overwrite",
+            context,
+            report,
+            repo.get("exclude_blocks", []),
+            config.get("header_comments", {}),
+        )
+
+
 def apply_explicit_files(
     repo: dict,
     target: Path,
@@ -647,6 +761,7 @@ def apply_explicit_files(
             context,
             report,
             repo.get("exclude_blocks", []),
+            config.get("header_comments", {}),
         )
 
 
@@ -870,6 +985,7 @@ def sync_repo(repo: dict, config: dict, source_pr: dict | None) -> str | None:
         run(["git", "checkout", "-B", branch], cwd=repo_dir)
 
         apply_sources(repo, repo_dir, repo_name, short_name, topics, base_branch, branch, config, report)
+        apply_skeletons(repo, repo_dir, repo_name, short_name, topics, base_branch, branch, config, report)
         apply_explicit_files(repo, repo_dir, repo_name, short_name, topics, base_branch, branch, config, report)
         remove_configured_files(
             repo_dir,
