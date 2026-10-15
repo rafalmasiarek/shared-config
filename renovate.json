@@ -1,10 +1,23 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
+  "dependencyDashboard": true,
+  "prBodyTemplate": "{{{header}}}{{{table}}}{{{warnings}}}{{{notes}}}{{{changelogs}}}{{{configDescription}}}\n\n## Review checklist\n\n- [ ] Review the version change and upstream release notes/changelog above.\n- [ ] Check for breaking changes, required migrations, and compatibility with the workflows using this action.\n- [ ] Review the workflow diff, especially permissions, inputs, and any pinned commit digest.\n- [ ] Confirm CI and repository-specific checks pass.\n\n## Security review\n\nCheck whether the update addresses a published advisory in [GitHub Security Advisories](https://github.com/advisories) or [OSV](https://osv.dev/). Renovate can surface vulnerability information when its data sources detect it, but the absence of an alert is not a security audit and does not prove the update is vulnerability-free.\n\n{{{controls}}}{{{footer}}}",
   "github-actions": {
     "fileMatch": [
       "^\\.github/workflows/[^/]+\\.ya?ml$",
       "^files/.+\\.ya?ml(\\.tpl)?$"
     ]
-  }
+  },
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions"],
+      "pinDigests": true
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    }
+  ]
 }

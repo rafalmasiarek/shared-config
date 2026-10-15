@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -22,6 +23,10 @@ CONFIG_PATH = ROOT / "repos.yml"
 IGNORED_TARGET_PATHS = {
     ".gitkeep",
 }
+SHARED_BLOCK_MARKER_RE = re.compile(
+    r"(?m)^[ \t]*# shared-config:block:(?P<action>start|end): "
+    r"(?P<name>[A-Za-z0-9_.-]+)[ \t]*(?:\r?\n|$)"
+)
 
 
 def run(cmd: list[str], cwd: Path | None = None, capture: bool = False) -> str:
@@ -36,7 +41,7 @@ def run(cmd: list[str], cwd: Path | None = None, capture: bool = False) -> str:
     return result.stdout if capture else ""
 
 
-def run_json(cmd: list[str]) -> dict:
+def run_json(cmd: list[str]) -> Any:
     return json.loads(run(cmd, capture=True))
 
 
@@ -312,13 +317,54 @@ def apply_file(
     mode: str,
     context: dict[str, Any],
     report: list[dict],
+    excluded_blocks: list[dict],
 ) -> None:
+    matching_rules = [rule for rule in excluded_blocks if rule["path"] == target_path]
+    source_content = (
+        read_source_text(source, context)
+        if source.suffix == ".tpl" or matching_rules
+        else None
+    )
+
+    if source_content is not None and not source_content.strip():
+        print(f"Skipping empty rendered template: {target_path}")
+        stat = source.stat()
+        report.append({
+            "source": source_path,
+            "target": target_path,
+            "mode": "empty-template",
+            "status": "skipped",
+            "size": stat.st_size,
+            "sha256": file_sha256(source),
+            "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        return
+
+    if matching_rules:
+        if mode != "overwrite":
+            raise ValueError(f"Block exclusions require overwrite mode: {target_path}")
+        if not destination.is_file():
+            raise ValueError(
+                f"Cannot preserve excluded blocks because destination file is missing: {target_path}"
+            )
+
+        source_content = preserve_excluded_blocks(
+            source_content,
+            destination.read_text(),
+            [rule["name"] for rule in matching_rules],
+            target_path,
+        )
+
     before_hash = optional_file_sha256(destination)
 
     print(f"Applying file: {source_path} -> {target_path} [{mode}]")
 
     if mode == "overwrite":
-        copy_file(source, destination, context)
+        if source_content is None:
+            copy_file(source, destination, context)
+        else:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(source_content)
         final_mode = "overwrite-template" if source.suffix == ".tpl" else "overwrite"
     elif mode == "append":
         final_mode = append_file(source, destination, source_path, context)
@@ -345,6 +391,78 @@ def apply_file(
         "sha256": file_sha256(source),
         "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
     })
+
+
+def is_excluded_path(target_path: str, excluded_paths: set[str]) -> bool:
+    return target_path in excluded_paths
+
+
+def validate_excluded_blocks(config: dict) -> None:
+    for repo in config.get("repositories", []):
+        for rule in repo.get("exclude_blocks", []):
+            if not isinstance(rule, dict):
+                raise ValueError(f"Invalid block exclusion for {repo.get('name')}: expected an object")
+
+            path = rule.get("path")
+            name = rule.get("name")
+
+            if not isinstance(path, str) or not path or Path(path).is_absolute() or ".." in Path(path).parts:
+                raise ValueError(f"Invalid block exclusion path for {repo.get('name')}: {path}")
+
+            if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+                raise ValueError(f"Invalid block exclusion name for {repo.get('name')}: {name}")
+
+
+def named_blocks(content: str, path: str) -> dict[str, tuple[int, int]]:
+    blocks: dict[str, tuple[int, int]] = {}
+    open_block: tuple[str, int] | None = None
+
+    for marker in SHARED_BLOCK_MARKER_RE.finditer(content):
+        action = marker.group("action")
+        name = marker.group("name")
+
+        if action == "start":
+            if open_block or name in blocks:
+                raise ValueError(f"Nested or duplicate shared-config block '{name}' in {path}")
+            open_block = (name, marker.start())
+        else:
+            if not open_block or open_block[0] != name:
+                raise ValueError(f"Unmatched shared-config block end '{name}' in {path}")
+            blocks[name] = (open_block[1], marker.end())
+            open_block = None
+
+    if open_block:
+        raise ValueError(f"Unclosed shared-config block '{open_block[0]}' in {path}")
+
+    return blocks
+
+
+def preserve_excluded_blocks(
+    source_content: str,
+    destination_content: str,
+    excluded_names: list[str],
+    target_path: str,
+) -> str:
+    source_blocks = named_blocks(source_content, target_path)
+    destination_blocks = named_blocks(destination_content, target_path)
+    replacements: list[tuple[int, int, str]] = []
+
+    for name in excluded_names:
+        if name not in source_blocks or name not in destination_blocks:
+            raise ValueError(
+                f"Cannot preserve shared-config block '{name}' in {target_path}; "
+                "the block must be marked in both source and destination"
+            )
+
+        start, end = source_blocks[name]
+        old_start, old_end = destination_blocks[name]
+        replacements.append((start, end, destination_content[old_start:old_end]))
+        print(f"Preserving existing block '{name}' in {target_path}")
+
+    for start, end, existing_block in sorted(replacements, reverse=True):
+        source_content = source_content[:start] + existing_block + source_content[end:]
+
+    return source_content
 
 
 def explicit_source_paths(repo: dict) -> set[Path]:
@@ -390,7 +508,7 @@ def copy_tree(
             print(f"Skipping globally ignored file: {relative_str}")
             continue
 
-        if target_path in excluded_paths or relative_str in excluded_paths:
+        if is_excluded_path(target_path, excluded_paths) or relative_str in excluded_paths:
             print(f"Skipping repo excluded file: {target_path}")
             continue
 
@@ -418,6 +536,7 @@ def copy_tree(
             mode,
             context,
             report,
+            repo.get("exclude_blocks", []),
         )
 
 
@@ -493,9 +612,15 @@ def apply_explicit_files(
     config: dict,
     report: list[dict],
 ) -> None:
+    excluded_paths = set(repo.get("exclude", []))
+
     for mapping in repo.get("files", []):
         source_path = mapping["from"]
         target_path = target_path_from_mapping(mapping["to"])
+
+        if is_excluded_path(target_path, excluded_paths):
+            print(f"Skipping repo excluded file: {target_path}")
+            continue
 
         source = safe_root_path(source_path)
         destination = target / target_path
@@ -521,12 +646,72 @@ def apply_explicit_files(
             mode,
             context,
             report,
+            repo.get("exclude_blocks", []),
         )
 
 
 def has_changes(repo_dir: Path) -> bool:
     output = run(["git", "status", "--porcelain"], cwd=repo_dir, capture=True)
     return bool(output.strip())
+
+
+def get_merged_renovate_pr() -> dict | None:
+    repository = os.environ.get("GITHUB_REPOSITORY")
+    commit = os.environ.get("GITHUB_SHA")
+
+    if not repository or not commit:
+        return None
+
+    pull_requests = run_json([
+        "gh",
+        "api",
+        f"repos/{repository}/commits/{commit}/pulls",
+    ])
+
+    if not isinstance(pull_requests, list):
+        raise ValueError("GitHub returned an invalid pull request list for the sync commit")
+
+    renovate_prs = [
+        pull_request
+        for pull_request in pull_requests
+        if isinstance(pull_request, dict)
+        and pull_request.get("merged_at")
+        and isinstance(pull_request.get("user"), dict)
+        and str(pull_request["user"].get("login", "")).lower()
+        in {"renovate[bot]", "renovate-bot"}
+    ]
+
+    if not renovate_prs:
+        return None
+
+    return max(renovate_prs, key=lambda pull_request: pull_request["merged_at"])
+
+
+def remove_configured_files(
+    repo_dir: Path,
+    paths: list[str],
+    excluded_paths: set[str],
+) -> None:
+    for path in paths:
+        relative = Path(path)
+
+        if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+            raise ValueError(f"Invalid removal path: {path}")
+
+        if is_excluded_path(relative.as_posix(), excluded_paths):
+            print(f"Skipping repo excluded file removal: {path}")
+            continue
+
+        target = repo_dir / relative
+
+        if not target.parent.resolve().is_relative_to(repo_dir.resolve()):
+            raise ValueError(f"Removal path escapes repository: {path}")
+
+        if target.is_symlink() or target.is_file():
+            print(f"Removing configured file: {path}")
+            target.unlink()
+        elif target.exists():
+            raise ValueError(f"Removal target is not a file: {path}")
 
 
 def pr_exists(repo_name: str, branch: str) -> bool:
@@ -581,13 +766,47 @@ def render_sync_report(report: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def render_sync_pr_body(
+    defaults: dict,
+    report: list[dict],
+    source_pr: dict | None,
+) -> str:
+    body = defaults["pr_body"].rstrip()
+
+    if source_pr:
+        title = source_pr.get("title", "Renovate update")
+        url = source_pr.get("html_url")
+        source_body = source_pr.get("body") or ""
+        source_body = re.sub(
+            r"<!--renovate-debug:.*?-->",
+            "",
+            source_body,
+            flags=re.DOTALL,
+        ).strip()
+
+        body += "\n\n## Source Renovate PR\n\n"
+        if url:
+            body += f"**[{title}]({url})**\n\n"
+        else:
+            body += f"**{title}**\n\n"
+        if source_body:
+            body += source_body + "\n"
+
+    body += "\n"
+    body += render_sync_report(report)
+    return body
+
+
 def create_pr_if_needed(
     repo_name: str,
     branch: str,
     base_branch: str,
     defaults: dict,
     report: list[dict],
+    source_pr: dict | None,
 ) -> str | None:
+    body = render_sync_pr_body(defaults, report, source_pr)
+
     if pr_exists(repo_name, branch):
         print(f"Open PR already exists for {repo_name}:{branch}")
         existing = run(
@@ -601,11 +820,13 @@ def create_pr_if_needed(
             ],
             capture=True,
         )
-        return existing.strip() or None
-
-    body = defaults["pr_body"].rstrip()
-    body += "\n"
-    body += render_sync_report(report)
+        existing_url = existing.strip()
+        if existing_url:
+            run(
+                ["gh", "pr", "edit", existing_url, "--body", body],
+                capture=True,
+            )
+        return existing_url or None
 
     url = run(
         [
@@ -628,7 +849,7 @@ def create_pr_if_needed(
     return url.strip() or None
 
 
-def sync_repo(repo: dict, config: dict) -> str | None:
+def sync_repo(repo: dict, config: dict, source_pr: dict | None) -> str | None:
     defaults = config["defaults"]
 
     repo_name = repo["name"]
@@ -650,6 +871,11 @@ def sync_repo(repo: dict, config: dict) -> str | None:
 
         apply_sources(repo, repo_dir, repo_name, short_name, topics, base_branch, branch, config, report)
         apply_explicit_files(repo, repo_dir, repo_name, short_name, topics, base_branch, branch, config, report)
+        remove_configured_files(
+            repo_dir,
+            defaults.get("remove_paths", []),
+            set(repo.get("exclude", [])),
+        )
 
         if not has_changes(repo_dir):
             print(f"No changes for {repo_name}")
@@ -661,7 +887,7 @@ def sync_repo(repo: dict, config: dict) -> str | None:
         run(["git", "commit", "-m", commit_message], cwd=repo_dir)
         run(["git", "push", "--force", "origin", branch], cwd=repo_dir)
 
-        return create_pr_if_needed(repo_name, branch, base_branch, defaults, report)
+        return create_pr_if_needed(repo_name, branch, base_branch, defaults, report, source_pr)
 
 
 def write_summary(results: list[dict]) -> None:
@@ -699,12 +925,18 @@ def main() -> None:
     with CONFIG_PATH.open() as f:
         config = yaml.safe_load(f)
 
+    validate_excluded_blocks(config)
+
+    source_pr = get_merged_renovate_pr()
+    if source_pr:
+        print(f"Sync source Renovate PR: {source_pr['html_url']}")
+
     results: list[dict] = []
 
     for repo in config.get("repositories", []):
         repo_name = repo["name"]
         try:
-            pr_url = sync_repo(repo, config)
+            pr_url = sync_repo(repo, config, source_pr)
             results.append({"repo": repo_name, "status": "ok", "pr_url": pr_url, "error": None})
         except Exception as e:
             print(f"[ERROR] {repo_name}: {e}")
