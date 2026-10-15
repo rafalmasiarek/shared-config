@@ -984,8 +984,8 @@ def sync_repo(repo: dict, config: dict, source_pr: dict | None) -> str | None:
         run(["git", "checkout", base_branch], cwd=repo_dir)
         run(["git", "checkout", "-B", branch], cwd=repo_dir)
 
-        apply_sources(repo, repo_dir, repo_name, short_name, topics, base_branch, branch, config, report)
         apply_skeletons(repo, repo_dir, repo_name, short_name, topics, base_branch, branch, config, report)
+        apply_sources(repo, repo_dir, repo_name, short_name, topics, base_branch, branch, config, report)
         apply_explicit_files(repo, repo_dir, repo_name, short_name, topics, base_branch, branch, config, report)
         remove_configured_files(
             repo_dir,
